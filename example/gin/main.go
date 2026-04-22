@@ -61,10 +61,15 @@ func main() {
 // ginAuth adapts a standard net/http middleware to a Gin middleware.
 func ginAuth(middleware func(http.Handler) http.Handler) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		nextCalled := false
 		middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			nextCalled = true
 			c.Request = r
 			c.Next()
 		})).ServeHTTP(c.Writer, c.Request)
+		if !nextCalled {
+			c.Abort()
+		}
 	}
 }
 

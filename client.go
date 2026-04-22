@@ -142,8 +142,8 @@ func (c *Client) Validate(ctx context.Context, apiKey string) (ValidateResponse,
 		var envelope validateEnvelope
 		if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 			return ValidateResponse{}, &AuthError{
-				Code:       CodeInternalServerError,
-				Message:    fmt.Sprintf("request failed with status %d", resp.StatusCode),
+				Code:       mapHTTPStatusToErrorCode(resp.StatusCode),
+				Message:    fmt.Sprintf("upstream returned non-JSON response with status %d", resp.StatusCode),
 				HTTPStatus: resp.StatusCode,
 			}
 		}

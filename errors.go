@@ -77,3 +77,27 @@ func mapErrorCodeToHTTPStatus(code ErrorCode) int {
 		return http.StatusInternalServerError
 	}
 }
+
+// mapHTTPStatusToErrorCode returns a best-effort ErrorCode for a raw HTTP status.
+func mapHTTPStatusToErrorCode(status int) ErrorCode {
+	switch status {
+	case http.StatusBadRequest:
+		return CodeBadRequest
+	case http.StatusUnauthorized:
+		return CodeInvalidAPIKey
+	case http.StatusForbidden:
+		return CodeKeyRevokedOrExpired
+	case http.StatusNotFound:
+		return CodeKeyNotFound
+	case http.StatusConflict:
+		return CodeResourceConflict
+	case http.StatusTooManyRequests:
+		return CodeRateLimitExceeded
+	case http.StatusInternalServerError:
+		return CodeInternalServerError
+	case http.StatusServiceUnavailable:
+		return CodeStorageUnavailable
+	default:
+		return CodeInternalServerError
+	}
+}

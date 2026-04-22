@@ -97,10 +97,15 @@ func dataHandler(c *gin.Context) {
 // ginAuth adapts cpauth.Auth to a Gin middleware.
 func ginAuth(mw func(http.Handler) http.Handler) gin.HandlerFunc {
     return func(c *gin.Context) {
+        nextCalled := false
         mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            nextCalled = true
             c.Request = r
             c.Next()
         })).ServeHTTP(c.Writer, c.Request)
+        if !nextCalled {
+            c.Abort()
+        }
     }
 }
 ```
