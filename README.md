@@ -19,6 +19,8 @@ go get github.com/coinpost/cp-auth-go
 
 ## Quick Start
 
+### Chi
+
 ```go
 package main
 
@@ -28,22 +30,78 @@ import (
     "time"
 
     cpauth "github.com/coinpost/cp-auth-go"
+    "github.com/go-chi/chi/v5"
 )
 
 func main() {
-    // Initialize once at startup
     _ = cpauth.SetDefault(cpauth.Config{
         BaseURL:    "https://auth.example.com/v1/",
         HTTPClient: &http.Client{Timeout: 10 * time.Second},
     })
 
-    http.Handle("/api/protected", cpauth.Auth()(http.HandlerFunc(handler)))
-    log.Fatal(http.ListenAndServe(":8080", nil))
+    r := chi.NewRouter()
+    r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+        w.Write([]byte(`{"status":"ok"}`))
+    })
+
+    r.Group(func(r chi.Router) {
+        r.Use(cpauth.Auth())
+        r.Get("/api/data", dataHandler)
+    })
+
+    log.Fatal(http.ListenAndServe(":8080", r))
 }
 
-func handler(w http.ResponseWriter, r *http.Request) {
+func dataHandler(w http.ResponseWriter, r *http.Request) {
     resp, _ := cpauth.ValidateResponseFromContext(r.Context())
     w.Write([]byte("owner: " + resp.Owner))
+}
+```
+
+### Gin
+
+```go
+package main
+
+import (
+    "net/http"
+    "time"
+
+    cpauth "github.com/coinpost/cp-auth-go"
+    "github.com/gin-gonic/gin"
+)
+
+func main() {
+    _ = cpauth.SetDefault(cpauth.Config{
+        BaseURL:    "https://auth.example.com/v1/",
+        HTTPClient: &http.Client{Timeout: 10 * time.Second},
+    })
+
+    r := gin.Default()
+    r.GET("/health", func(c *gin.Context) {
+        c.JSON(http.StatusOK, gin.H{"status": "ok"})
+    })
+
+    api := r.Group("/api")
+    api.Use(ginAuth(cpauth.Auth()))
+    api.GET("/data", dataHandler)
+
+    r.Run(":8080")
+}
+
+func dataHandler(c *gin.Context) {
+    resp, _ := cpauth.ValidateResponseFromContext(c.Request.Context())
+    c.JSON(http.StatusOK, gin.H{"owner": resp.Owner})
+}
+
+// ginAuth adapts cpauth.Auth to a Gin middleware.
+func ginAuth(mw func(http.Handler) http.Handler) gin.HandlerFunc {
+    return func(c *gin.Context) {
+        mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            c.Request = r
+            c.Next()
+        })).ServeHTTP(c.Writer, c.Request)
+    }
 }
 ```
 
@@ -200,6 +258,7 @@ See the [`example/`](example/) directory:
 
 - [`example/main.go`](example/main.go) — standard library `net/http` usage
 - [`example/chi/main.go`](example/chi/main.go) — chi router with group-level middleware
+- [`example/gin/main.go`](example/gin/main.go) — gin router with adapter middleware
 
 ## Security Notes
 
