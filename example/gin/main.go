@@ -36,6 +36,11 @@ func main() {
 	api.Use(ginAuth(cpauth.Auth()))
 	api.GET("/data", dataHandler)
 
+	// Routes protected by auth middleware with scope for legacy header fallback.
+	sf := r.Group("/api/sourcefinder")
+	sf.Use(ginAuth(cpauth.Auth(cpauth.WithScope("sourcefinder"))))
+	sf.GET("", dataHandler)
+
 	// Routes protected by auth middleware with custom error handler.
 	custom := r.Group("/api/custom-error")
 	custom.Use(ginAuth(cpauth.Auth(cpauth.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err *cpauth.AuthError) {

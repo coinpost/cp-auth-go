@@ -31,7 +31,7 @@ func TestIntegration_EndToEnd(t *testing.T) {
 	}
 
 	// 1. Direct client validation
-	resp, err := client.Validate(t.Context(), apiKey)
+	resp, err := client.Validate(t.Context(), apiKey, "")
 	if err != nil {
 		t.Fatalf("validate failed: %v", err)
 	}

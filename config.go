@@ -14,6 +14,9 @@ type Config struct {
 	// BaseURL is the root URL of cp-api-auth, e.g. "http://10.10.10.183:8031/v1/"
 	BaseURL string
 
+	// Scope is the auth scope to validate against, e.g. "terminal" or "sourcefinder".
+	Scope string
+
 	// HTTPClient is the externally injected http.Client.
 	// The caller is responsible for configuring timeouts, retries, transport, etc.
 	HTTPClient *http.Client

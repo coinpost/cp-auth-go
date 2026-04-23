@@ -288,3 +288,57 @@ func TestClient_Auth(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", rec.Code)
 	}
 }
+
+func TestMiddleware_WithScope_LegacyFallback(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req ValidateRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+		if req.APIKey != "legacy-cpt-key" {
+			t.Fatalf("expected api_key 'legacy-cpt-key', got %q", req.APIKey)
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(validateEnvelope{
+			Code:    0,
+			Message: "ok",
+			Data: ValidateResponse{
+				Valid:  true,
+				ID:     "550e8400-e29b-41d4-a716-446655440000",
+				Owner:  "test-user",
+				Scopes: []string{"terminal"},
+			},
+		})
+	}))
+	defer remote.Close()
+
+	client, err := NewClient(Config{
+		BaseURL:    remote.URL + "/v1/",
+		HTTPClient: http.DefaultClient,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	mw := NewMiddleware(client, WithScope("terminal"))
+
+	nextCalled := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	req.Header.Set("X-Cp-Terminal-Api-Key", "legacy-cpt-key")
+	rec := httptest.NewRecorder()
+
+	mw.Handler(next).ServeHTTP(rec, req)
+
+	if !nextCalled {
+		t.Fatal("expected next handler to be called")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+}

@@ -8,8 +8,38 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync/atomic"
 )
+
+const (
+	headerAPIKey             = "CP-X-API-KEY"
+	headerLegacyCpTerminal   = "X-CP-TERMINAL-API-KEY"
+	headerLegacySourceFinder = "X-SOURCEFINDER-KEY"
+
+	scopeTerminal     = "terminal"
+	scopeSourceFinder = "sourcefinder"
+)
+
+// extractAPIKey reads the API key from headers with legacy fallback.
+// 1. Read CP-X-API-KEY. If present, return it.
+// 2. If empty, use scope to determine legacy header:
+//   - "terminal"    -> X-Cp-Terminal-Api-Key
+//   - "sourcefinder" -> X-SOURCEFINDER-KEY
+//
+// 3. Return empty string if nothing found.
+func extractAPIKey(r *http.Request, scope string) string {
+	if v := r.Header.Get(headerAPIKey); v != "" {
+		return v
+	}
+	switch strings.ToLower(scope) {
+	case scopeTerminal:
+		return r.Header.Get(headerLegacyCpTerminal)
+	case scopeSourceFinder:
+		return r.Header.Get(headerLegacySourceFinder)
+	}
+	return ""
+}
 
 var defaultClient atomic.Pointer[Client]
 
@@ -57,21 +87,21 @@ func loadDefaultClient() *Client {
 }
 
 // Validate uses the default Client to validate an API key.
-func Validate(ctx context.Context, apiKey string) (ValidateResponse, error) {
+func Validate(ctx context.Context, apiKey string, scope string) (ValidateResponse, error) {
 	c := loadDefaultClient()
 	if c == nil {
 		panic("cpauth: default client not initialized")
 	}
-	return c.Validate(ctx, apiKey)
+	return c.Validate(ctx, apiKey, scope)
 }
 
 // ValidateFromRequest uses the default Client to validate an API key extracted from the request header CP-X-API-KEY.
-func ValidateFromRequest(r *http.Request) (ValidateResponse, error) {
+func ValidateFromRequest(r *http.Request, scope string) (ValidateResponse, error) {
 	c := loadDefaultClient()
 	if c == nil {
 		panic("cpauth: default client not initialized")
 	}
-	return c.ValidateFromRequest(r)
+	return c.ValidateFromRequest(r, scope)
 }
 
 // Client communicates with the remote cp-api-auth service.
@@ -97,8 +127,8 @@ func MustNewClient(cfg Config) *Client {
 }
 
 // Validate calls POST /v1/validate and returns the parsed data or an AuthError.
-func (c *Client) Validate(ctx context.Context, apiKey string) (ValidateResponse, error) {
-	reqBody, err := json.Marshal(ValidateRequest{APIKey: apiKey})
+func (c *Client) Validate(ctx context.Context, apiKey string, scope string) (ValidateResponse, error) {
+	reqBody, err := json.Marshal(ValidateRequest{APIKey: apiKey, Scope: scope})
 	if err != nil {
 		return ValidateResponse{}, &AuthError{
 			Code:       CodeInternalServerError,
@@ -187,8 +217,8 @@ func (c *Client) Validate(ctx context.Context, apiKey string) (ValidateResponse,
 }
 
 // ValidateFromRequest extracts the API key from the request header CP-X-API-KEY and validates it.
-func (c *Client) ValidateFromRequest(r *http.Request) (ValidateResponse, error) {
-	apiKey := r.Header.Get("CP-X-API-KEY")
+func (c *Client) ValidateFromRequest(r *http.Request, scope string) (ValidateResponse, error) {
+	apiKey := extractAPIKey(r, scope)
 	if apiKey == "" {
 		return ValidateResponse{}, &AuthError{
 			Code:       CodeInvalidAPIKey,
@@ -196,5 +226,5 @@ func (c *Client) ValidateFromRequest(r *http.Request) (ValidateResponse, error) 
 			HTTPStatus: http.StatusUnauthorized,
 		}
 	}
-	return c.Validate(r.Context(), apiKey)
+	return c.Validate(r.Context(), apiKey, scope)
 }

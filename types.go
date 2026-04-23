@@ -3,6 +3,7 @@ package cpauth
 // ValidateRequest is the payload sent to POST /v1/validate.
 type ValidateRequest struct {
 	APIKey string `json:"api_key"`
+	Scope  string `json:"scope"`
 }
 
 // ValidateResponse is the nested "data" object from the remote service.

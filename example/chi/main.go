@@ -38,6 +38,13 @@ func main() {
 		r.Get("/api/data", dataHandler)
 	})
 
+	// Routes protected by auth middleware with scope for legacy header fallback.
+	r.Group(func(r chi.Router) {
+		r.Use(cpauth.Auth(cpauth.WithScope("sourcefinder")))
+
+		r.Get("/api/sourcefinder", dataHandler)
+	})
+
 	// Routes protected by auth middleware with custom error handler.
 	r.Group(func(r chi.Router) {
 		r.Use(cpauth.Auth(cpauth.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err *cpauth.AuthError) {

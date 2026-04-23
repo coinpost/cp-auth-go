@@ -35,10 +35,10 @@ func (e *AuthError) Error() string {
 // ErrorHandler is called when authentication fails or the remote service returns an error.
 // The handler receives the original http.ResponseWriter and *http.Request, plus the structured AuthError.
 // The handler is responsible for writing the HTTP response.
-type ErrorHandler func(w http.ResponseWriter, r *http.Request, err *AuthError)
+type ErrorHandler func(w http.ResponseWriter, err *AuthError)
 
 // defaultErrorHandler maps known error codes to HTTP statuses and writes a JSON error body.
-func defaultErrorHandler(w http.ResponseWriter, r *http.Request, err *AuthError) {
+func defaultErrorHandler(w http.ResponseWriter, err *AuthError) {
 	status := err.HTTPStatus
 	if status == 0 {
 		status = http.StatusInternalServerError

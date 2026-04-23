@@ -20,7 +20,9 @@ func main() {
 
 	// --- Standard library style ---
 	// Build a Middleware instance and wrap handlers individually.
+	// Use WithScope to enable legacy header fallback (e.g. "terminal" or "sourcefinder").
 	auth := cpauth.DefaultMiddleware(
+		cpauth.WithScope("terminal"),
 		cpauth.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err *cpauth.AuthError) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(err.HTTPStatus)
@@ -104,7 +106,7 @@ func protectedHandler(w http.ResponseWriter, r *http.Request) {
 // validateHandler demonstrates direct usage of ValidateFromRequest without middleware.
 // It reads CP-X-API-KEY from the request header and validates it explicitly.
 func validateHandler(w http.ResponseWriter, r *http.Request) {
-	resp, err := cpauth.ValidateFromRequest(r)
+	resp, err := cpauth.ValidateFromRequest(r, "")
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		if authErr, ok := err.(*cpauth.AuthError); ok {

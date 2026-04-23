@@ -5,12 +5,11 @@ import (
 	"net/http"
 )
 
-const headerAPIKey = "CP-X-API-KEY"
-
 // Middleware is the authentication middleware for net/http.
 type Middleware struct {
 	client       *Client
 	errorHandler ErrorHandler
+	scope        string
 }
 
 // MiddlewareOption configures Middleware.
@@ -25,6 +24,13 @@ func WithErrorHandler(fn ErrorHandler) MiddlewareOption {
 	}
 }
 
+// WithScope sets the scope used for legacy header fallback.
+func WithScope(scope string) MiddlewareOption {
+	return func(m *Middleware) {
+		m.scope = scope
+	}
+}
+
 // NewMiddleware creates a Middleware. Requires a non-nil Client.
 func NewMiddleware(client *Client, opts ...MiddlewareOption) *Middleware {
 	if client == nil {
@@ -33,6 +39,7 @@ func NewMiddleware(client *Client, opts ...MiddlewareOption) *Middleware {
 	m := &Middleware{
 		client:       client,
 		errorHandler: defaultErrorHandler,
+		scope:        client.config.Scope,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -52,9 +59,9 @@ func DefaultMiddleware(opts ...MiddlewareOption) *Middleware {
 // Handler wraps an http.Handler with API key authentication.
 func (m *Middleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		apiKey := r.Header.Get(headerAPIKey)
+		apiKey := extractAPIKey(r, m.scope)
 		if apiKey == "" {
-			m.errorHandler(w, r, &AuthError{
+			m.errorHandler(w, &AuthError{
 				Code:       CodeInvalidAPIKey,
 				Message:    "missing CP-X-API-KEY header",
 				HTTPStatus: http.StatusUnauthorized,
@@ -62,12 +69,12 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		resp, err := m.client.Validate(r.Context(), apiKey)
+		resp, err := m.client.Validate(r.Context(), apiKey, m.scope)
 		if err != nil {
 			if authErr, ok := err.(*AuthError); ok {
-				m.errorHandler(w, r, authErr)
+				m.errorHandler(w, authErr)
 			} else {
-				m.errorHandler(w, r, &AuthError{
+				m.errorHandler(w, &AuthError{
 					Code:       CodeInternalServerError,
 					Message:    err.Error(),
 					HTTPStatus: http.StatusInternalServerError,
@@ -104,4 +111,9 @@ func Auth(opts ...MiddlewareOption) func(http.Handler) http.Handler {
 // Auth returns a standard net/http middleware using this Client.
 func (c *Client) Auth(opts ...MiddlewareOption) func(http.Handler) http.Handler {
 	return NewMiddleware(c, opts...).Handler
+}
+
+// AuthWithErrHandle is like Auth but allows a custom error handler.
+func (c *Client) AuthWithErrHandle(fn ErrorHandler, opts ...MiddlewareOption) func(http.Handler) http.Handler {
+	return NewMiddleware(c, append(opts, WithErrorHandler(fn))...).Handler
 }
