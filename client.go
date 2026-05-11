@@ -14,25 +14,46 @@ import (
 
 const (
 	headerAPIKey             = "CP-X-API-KEY"
+	headerAuthorization      = "Authorization"
 	headerLegacyCpTerminal   = "X-CP-TERMINAL-API-KEY"
 	headerLegacySourceFinder = "X-SOURCEFINDER-KEY"
 
 	scopeTerminal     = "terminal"
 	scopeSourceFinder = "sourcefinder"
+	scopeOracle       = "oracle"
 )
+
+// HasAPIKeyHeader reports whether the request contains the standard API key header.
+func HasAPIKeyHeader(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	return r.Header.Get(headerAPIKey) != ""
+}
+
+func extractBearerToken(r *http.Request) string {
+	fields := strings.Fields(r.Header.Get(headerAuthorization))
+	if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
+		return ""
+	}
+	return fields[1]
+}
 
 // extractAPIKey reads the API key from headers with legacy fallback.
 // 1. Read CP-X-API-KEY. If present, return it.
-// 2. If empty, use scope to determine legacy header:
+// 2. If scope is "oracle", read Authorization: Bearer <token>.
+// 3. If empty, use scope to determine legacy header:
 //   - "terminal"    -> X-Cp-Terminal-Api-Key
 //   - "sourcefinder" -> X-SOURCEFINDER-KEY
 //
-// 3. Return empty string if nothing found.
+// 4. Return empty string if nothing found.
 func extractAPIKey(r *http.Request, scope string) string {
 	if v := r.Header.Get(headerAPIKey); v != "" {
 		return v
 	}
 	switch strings.ToLower(scope) {
+	case scopeOracle:
+		return extractBearerToken(r)
 	case scopeTerminal:
 		return r.Header.Get(headerLegacyCpTerminal)
 	case scopeSourceFinder:
@@ -222,7 +243,7 @@ func (c *Client) ValidateFromRequest(r *http.Request, scope string) (ValidateRes
 	if apiKey == "" {
 		return ValidateResponse{}, &AuthError{
 			Code:       CodeInvalidAPIKey,
-			Message:    "missing CP-X-API-KEY header",
+			Message:    "missing API key header",
 			HTTPStatus: http.StatusUnauthorized,
 		}
 	}

@@ -8,6 +8,51 @@ import (
 	"testing"
 )
 
+func TestHasAPIKeyHeader(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *http.Request
+		want bool
+	}{
+		{
+			name: "standard header present",
+			req: func() *http.Request {
+				req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+				req.Header.Set("CP-X-API-KEY", "test-api-key")
+				return req
+			}(),
+			want: true,
+		},
+		{
+			name: "standard header missing",
+			req:  httptest.NewRequest(http.MethodGet, "/api/data", nil),
+			want: false,
+		},
+		{
+			name: "legacy header present",
+			req: func() *http.Request {
+				req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+				req.Header.Set("X-Cp-Terminal-Api-Key", "legacy-cpt-key")
+				return req
+			}(),
+			want: false,
+		},
+		{
+			name: "nil request",
+			req:  nil,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := HasAPIKeyHeader(tt.req); got != tt.want {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestNewClient_InvalidBaseURL(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -181,6 +226,112 @@ func TestClient_ValidateFromRequest_ExtractsHeader(t *testing.T) {
 	}
 	if resp.ID != "id-123" {
 		t.Fatalf("expected id 'id-123', got %q", resp.ID)
+	}
+}
+
+func TestClient_ValidateFromRequest_ExtractsOracleBearerToken(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req ValidateRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+		if req.APIKey != "oracle-token" {
+			t.Fatalf("expected api_key 'oracle-token', got %q", req.APIKey)
+		}
+		if req.Scope != "oracle" {
+			t.Fatalf("expected scope 'oracle', got %q", req.Scope)
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(validateEnvelope{
+			Code:    0,
+			Message: "ok",
+			Data: ValidateResponse{
+				Valid: true,
+				ID:    "id-oracle",
+				Owner: "owner",
+			},
+		})
+	}))
+	defer remote.Close()
+
+	client, err := NewClient(Config{
+		BaseURL:    remote.URL + "/v1/",
+		HTTPClient: http.DefaultClient,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	req.Header.Set("Authorization", "Bearer oracle-token")
+	resp, err := client.ValidateFromRequest(req, "oracle")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ID != "id-oracle" {
+		t.Fatalf("expected id 'id-oracle', got %q", resp.ID)
+	}
+}
+
+func TestExtractAPIKey_OracleBearerToken(t *testing.T) {
+	tests := []struct {
+		name  string
+		scope string
+		setup func(*http.Request)
+		want  string
+	}{
+		{
+			name:  "lowercase bearer scheme",
+			scope: "oracle",
+			setup: func(req *http.Request) {
+				req.Header.Set("Authorization", "bearer oracle-token")
+			},
+			want: "oracle-token",
+		},
+		{
+			name:  "bearer ignored outside oracle scope",
+			scope: "terminal",
+			setup: func(req *http.Request) {
+				req.Header.Set("Authorization", "Bearer oracle-token")
+			},
+			want: "",
+		},
+		{
+			name:  "empty bearer token",
+			scope: "oracle",
+			setup: func(req *http.Request) {
+				req.Header.Set("Authorization", "Bearer")
+			},
+			want: "",
+		},
+		{
+			name:  "basic auth ignored",
+			scope: "oracle",
+			setup: func(req *http.Request) {
+				req.Header.Set("Authorization", "Basic abc")
+			},
+			want: "",
+		},
+		{
+			name:  "standard header wins over bearer",
+			scope: "oracle",
+			setup: func(req *http.Request) {
+				req.Header.Set("CP-X-API-KEY", "standard-key")
+				req.Header.Set("Authorization", "Bearer oracle-token")
+			},
+			want: "standard-key",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+			tt.setup(req)
+			if got := extractAPIKey(req, tt.scope); got != tt.want {
+				t.Fatalf("expected api key %q, got %q", tt.want, got)
+			}
+		})
 	}
 }
 

@@ -61,9 +61,9 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		apiKey := extractAPIKey(r, m.scope)
 		if apiKey == "" {
-			m.errorHandler(w, &AuthError{
+			m.errorHandler(w, r, &AuthError{
 				Code:       CodeInvalidAPIKey,
-				Message:    "missing CP-X-API-KEY header",
+				Message:    "missing API key header",
 				HTTPStatus: http.StatusUnauthorized,
 			})
 			return
@@ -72,9 +72,9 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 		resp, err := m.client.Validate(r.Context(), apiKey, m.scope)
 		if err != nil {
 			if authErr, ok := err.(*AuthError); ok {
-				m.errorHandler(w, authErr)
+				m.errorHandler(w, r, authErr)
 			} else {
-				m.errorHandler(w, &AuthError{
+				m.errorHandler(w, r, &AuthError{
 					Code:       CodeInternalServerError,
 					Message:    err.Error(),
 					HTTPStatus: http.StatusInternalServerError,
