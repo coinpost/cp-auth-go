@@ -20,7 +20,7 @@ func main() {
 
 	// --- Standard library style ---
 	// Build a Middleware instance and wrap handlers individually.
-	// Use WithScope to enable legacy header fallback (e.g. "terminal" or "sourcefinder").
+	// Use WithScope to enable legacy fallback (e.g. "terminal", "sourcefinder", or "feedstream").
 	auth := cpauth.DefaultMiddleware(
 		cpauth.WithScope("terminal"),
 		cpauth.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err *cpauth.AuthError) {

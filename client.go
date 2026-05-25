@@ -17,10 +17,12 @@ const (
 	headerAuthorization      = "Authorization"
 	headerLegacyCpTerminal   = "X-CP-TERMINAL-API-KEY"
 	headerLegacySourceFinder = "X-SOURCEFINDER-KEY"
+	headerLegacyFeedstream   = "X-FEEDSTREAM-KEY"
 
 	scopeTerminal     = "terminal"
 	scopeSourceFinder = "sourcefinder"
 	scopeOracle       = "oracle"
+	scopeFeedstream   = "feedstream"
 )
 
 // HasAPIKeyHeader reports whether the request contains the standard API key header.
@@ -43,8 +45,9 @@ func extractBearerToken(r *http.Request) string {
 // 1. Read CP-X-API-KEY. If present, return it.
 // 2. If scope is "oracle", read Authorization: Bearer <token>.
 // 3. If empty, use scope to determine legacy header:
-//   - "terminal"    -> X-Cp-Terminal-Api-Key
+//   - "terminal"     -> X-Cp-Terminal-Api-Key
 //   - "sourcefinder" -> X-SOURCEFINDER-KEY
+//   - "feedstream"   -> X-FEEDSTREAM-KEY header, then X-FEEDSTREAM-KEY query parameter
 //
 // 4. Return empty string if nothing found.
 func extractAPIKey(r *http.Request, scope string) string {
@@ -58,6 +61,11 @@ func extractAPIKey(r *http.Request, scope string) string {
 		return r.Header.Get(headerLegacyCpTerminal)
 	case scopeSourceFinder:
 		return r.Header.Get(headerLegacySourceFinder)
+	case scopeFeedstream:
+		if v := r.Header.Get(headerLegacyFeedstream); v != "" {
+			return v
+		}
+		return r.URL.Query().Get(headerLegacyFeedstream)
 	}
 	return ""
 }

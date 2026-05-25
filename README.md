@@ -164,6 +164,9 @@ Reads `CP-X-API-KEY` from the request header automatically:
 resp, err := cpauth.ValidateFromRequest(r)
 ```
 
+For legacy fallback, pass a scope such as `terminal`, `sourcefinder`, or `feedstream`.
+The `feedstream` scope reads `X-FEEDSTREAM-KEY` from the request header, then from the URL query parameter with the same name.
+
 ## Middleware
 
 ### Standard library style

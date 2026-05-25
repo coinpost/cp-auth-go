@@ -335,6 +335,60 @@ func TestExtractAPIKey_OracleBearerToken(t *testing.T) {
 	}
 }
 
+func TestExtractAPIKey_Feedstream(t *testing.T) {
+	tests := []struct {
+		name  string
+		scope string
+		path  string
+		setup func(*http.Request)
+		want  string
+	}{
+		{
+			name:  "standard header wins over feedstream header and query",
+			scope: "feedstream",
+			path:  "/api/data?X-FEEDSTREAM-KEY=query-key",
+			setup: func(req *http.Request) {
+				req.Header.Set("CP-X-API-KEY", "standard-key")
+				req.Header.Set("X-FEEDSTREAM-KEY", "legacy-feedstream-key")
+			},
+			want: "standard-key",
+		},
+		{
+			name:  "feedstream legacy header",
+			scope: "feedstream",
+			path:  "/api/data?X-FEEDSTREAM-KEY=query-key",
+			setup: func(req *http.Request) {
+				req.Header.Set("X-FEEDSTREAM-KEY", "legacy-feedstream-key")
+			},
+			want: "legacy-feedstream-key",
+		},
+		{
+			name:  "feedstream query parameter",
+			scope: "feedstream",
+			path:  "/api/data?X-FEEDSTREAM-KEY=query-key",
+			setup: func(req *http.Request) {},
+			want:  "query-key",
+		},
+		{
+			name:  "feedstream query ignored outside feedstream scope",
+			scope: "sourcefinder",
+			path:  "/api/data?X-FEEDSTREAM-KEY=query-key",
+			setup: func(req *http.Request) {},
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			tt.setup(req)
+			if got := extractAPIKey(req, tt.scope); got != tt.want {
+				t.Fatalf("expected api key %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestClient_Validate_ScopePassed(t *testing.T) {
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -459,6 +513,50 @@ func TestClient_ValidateFromRequest_LegacyTerminal(t *testing.T) {
 	}
 	if resp.ID != "id-cpt" {
 		t.Fatalf("expected id 'id-cpt', got %q", resp.ID)
+	}
+}
+
+func TestClient_ValidateFromRequest_FeedstreamQuery(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req ValidateRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+		if req.APIKey != "query-feedstream-key" {
+			t.Fatalf("expected api_key 'query-feedstream-key', got %q", req.APIKey)
+		}
+		if req.Scope != "feedstream" {
+			t.Fatalf("expected scope 'feedstream', got %q", req.Scope)
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(validateEnvelope{
+			Code:    0,
+			Message: "ok",
+			Data: ValidateResponse{
+				Valid: true,
+				ID:    "id-feedstream",
+				Owner: "owner",
+			},
+		})
+	}))
+	defer remote.Close()
+
+	client, err := NewClient(Config{
+		BaseURL:    remote.URL + "/v1/",
+		HTTPClient: http.DefaultClient,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/data?X-FEEDSTREAM-KEY=query-feedstream-key", nil)
+	resp, err := client.ValidateFromRequest(req, "feedstream")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ID != "id-feedstream" {
+		t.Fatalf("expected id 'id-feedstream', got %q", resp.ID)
 	}
 }
 
