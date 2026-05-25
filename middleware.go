@@ -8,14 +8,20 @@ import (
 
 // Middleware is the authentication middleware for net/http.
 type Middleware struct {
-	client        *Client
-	errorHandler  ErrorHandler
-	scope         string
-	skipAuthPaths map[string]struct{}
+	client         *Client
+	errorHandler   ErrorHandler
+	successHandler SuccessHandler
+	ignoreError    bool
+	scope          string
+	skipAuthPaths  map[string]struct{}
 }
 
 // MiddlewareOption configures Middleware.
 type MiddlewareOption func(*Middleware)
+
+// SuccessHandler is called after authentication succeeds and before the next handler runs.
+// It is intended for side effects such as logging, metrics, or audit work.
+type SuccessHandler func(w http.ResponseWriter, r *http.Request, apiKey string, resp ValidateResponse)
 
 // WithErrorHandler sets a custom error handler. Passing nil is a no-op.
 func WithErrorHandler(fn ErrorHandler) MiddlewareOption {
@@ -23,6 +29,22 @@ func WithErrorHandler(fn ErrorHandler) MiddlewareOption {
 		if fn != nil {
 			m.errorHandler = fn
 		}
+	}
+}
+
+// WithSuccessHandler sets a custom success handler. Passing nil is a no-op.
+func WithSuccessHandler(fn SuccessHandler) MiddlewareOption {
+	return func(m *Middleware) {
+		if fn != nil {
+			m.successHandler = fn
+		}
+	}
+}
+
+// WithIgnoreError bypasses authentication errors and lets the next handler run.
+func WithIgnoreError() MiddlewareOption {
+	return func(m *Middleware) {
+		m.ignoreError = true
 	}
 }
 
@@ -86,6 +108,10 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 
 		apiKey := extractAPIKey(r, m.scope)
 		if apiKey == "" {
+			if m.ignoreError {
+				next.ServeHTTP(w, r)
+				return
+			}
 			m.errorHandler(w, r, &AuthError{
 				Code:       CodeInvalidAPIKey,
 				Message:    "missing API key header",
@@ -96,6 +122,10 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 
 		resp, err := m.client.Validate(r.Context(), apiKey, m.scope)
 		if err != nil {
+			if m.ignoreError {
+				next.ServeHTTP(w, r)
+				return
+			}
 			if authErr, ok := err.(*AuthError); ok {
 				m.errorHandler(w, r, authErr)
 			} else {
@@ -109,6 +139,9 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 		}
 
 		r = r.WithContext(context.WithValue(r.Context(), validateResponseCtxKey, resp))
+		if m.successHandler != nil {
+			m.successHandler(w, r, apiKey, resp)
+		}
 		next.ServeHTTP(w, r)
 	})
 }

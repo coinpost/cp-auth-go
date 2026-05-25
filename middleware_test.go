@@ -16,7 +16,10 @@ func TestMiddleware_MissingHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
-	mw := NewMiddleware(client)
+	successHandlerCalled := false
+	mw := NewMiddleware(client, WithSuccessHandler(func(w http.ResponseWriter, r *http.Request, apiKey string, resp ValidateResponse) {
+		successHandlerCalled = true
+	}))
 
 	nextCalled := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -30,6 +33,9 @@ func TestMiddleware_MissingHeader(t *testing.T) {
 
 	if nextCalled {
 		t.Fatal("expected next handler NOT to be called")
+	}
+	if successHandlerCalled {
+		t.Fatal("expected success handler NOT to be called")
 	}
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected status 401, got %d", rec.Code)
@@ -75,7 +81,26 @@ func TestMiddleware_ValidKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
-	mw := NewMiddleware(client)
+	successHandlerCalled := 0
+	mw := NewMiddleware(client, WithSuccessHandler(func(w http.ResponseWriter, r *http.Request, apiKey string, resp ValidateResponse) {
+		successHandlerCalled++
+		if apiKey != "good-key" {
+			t.Fatalf("expected success handler api key %q, got %q", "good-key", apiKey)
+		}
+		if resp.ID != "550e8400-e29b-41d4-a716-446655440000" {
+			t.Fatalf("expected success handler id %q, got %q", "550e8400-e29b-41d4-a716-446655440000", resp.ID)
+		}
+		if resp.Owner != "test-user" {
+			t.Fatalf("expected success handler owner %q, got %q", "test-user", resp.Owner)
+		}
+		ctxResp, ok := ValidateResponseFromContext(r.Context())
+		if !ok {
+			t.Fatal("expected validate response in success handler request context")
+		}
+		if ctxResp.ID != resp.ID {
+			t.Fatalf("expected context response id %q, got %q", resp.ID, ctxResp.ID)
+		}
+	}))
 
 	nextCalled := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +117,9 @@ func TestMiddleware_ValidKey(t *testing.T) {
 
 	if !nextCalled {
 		t.Fatal("expected next handler to be called")
+	}
+	if successHandlerCalled != 1 {
+		t.Fatalf("expected success handler to be called once, got %d", successHandlerCalled)
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", rec.Code)
@@ -117,10 +145,16 @@ func TestMiddleware_RemoteError(t *testing.T) {
 	}
 
 	var captured *AuthError
-	mw := NewMiddleware(client, WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err *AuthError) {
-		captured = err
-		w.WriteHeader(err.HTTPStatus)
-	}))
+	successHandlerCalled := false
+	mw := NewMiddleware(client,
+		WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err *AuthError) {
+			captured = err
+			w.WriteHeader(err.HTTPStatus)
+		}),
+		WithSuccessHandler(func(w http.ResponseWriter, r *http.Request, apiKey string, resp ValidateResponse) {
+			successHandlerCalled = true
+		}),
+	)
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next handler should not be called")
@@ -135,11 +169,124 @@ func TestMiddleware_RemoteError(t *testing.T) {
 	if captured == nil {
 		t.Fatal("expected error handler to be called")
 	}
+	if successHandlerCalled {
+		t.Fatal("expected success handler NOT to be called")
+	}
 	if captured.Code != CodeKeyRevokedOrExpired {
 		t.Fatalf("expected code 1003, got %d", captured.Code)
 	}
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected status 403, got %d", rec.Code)
+	}
+}
+
+func TestMiddleware_WithIgnoreError_MissingHeaderCallsNext(t *testing.T) {
+	client, err := NewClient(Config{
+		BaseURL:    "http://localhost:9999/v1/",
+		HTTPClient: http.DefaultClient,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	errorHandlerCalled := false
+	successHandlerCalled := false
+	mw := NewMiddleware(client,
+		WithIgnoreError(),
+		WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err *AuthError) {
+			errorHandlerCalled = true
+			w.WriteHeader(err.HTTPStatus)
+		}),
+		WithSuccessHandler(func(w http.ResponseWriter, r *http.Request, apiKey string, resp ValidateResponse) {
+			successHandlerCalled = true
+		}),
+	)
+
+	nextCalled := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		if _, ok := ValidateResponseFromContext(r.Context()); ok {
+			t.Fatal("expected ignored error request to have no validate response in context")
+		}
+		w.WriteHeader(http.StatusAccepted)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	rec := httptest.NewRecorder()
+
+	mw.Handler(next).ServeHTTP(rec, req)
+
+	if !nextCalled {
+		t.Fatal("expected next handler to be called")
+	}
+	if errorHandlerCalled {
+		t.Fatal("expected error handler not to be called")
+	}
+	if successHandlerCalled {
+		t.Fatal("expected success handler not to be called")
+	}
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", rec.Code)
+	}
+}
+
+func TestMiddleware_WithIgnoreError_RemoteErrorCallsNext(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(validateEnvelope{
+			Code:    1003,
+			Message: "revoked",
+		})
+	}))
+	defer remote.Close()
+
+	client, err := NewClient(Config{
+		BaseURL:    remote.URL + "/v1/",
+		HTTPClient: http.DefaultClient,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	errorHandlerCalled := false
+	successHandlerCalled := false
+	mw := NewMiddleware(client,
+		WithIgnoreError(),
+		WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err *AuthError) {
+			errorHandlerCalled = true
+			w.WriteHeader(err.HTTPStatus)
+		}),
+		WithSuccessHandler(func(w http.ResponseWriter, r *http.Request, apiKey string, resp ValidateResponse) {
+			successHandlerCalled = true
+		}),
+	)
+
+	nextCalled := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		if _, ok := ValidateResponseFromContext(r.Context()); ok {
+			t.Fatal("expected ignored error request to have no validate response in context")
+		}
+		w.WriteHeader(http.StatusAccepted)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	req.Header.Set("CP-X-API-KEY", "revoked-key")
+	rec := httptest.NewRecorder()
+
+	mw.Handler(next).ServeHTTP(rec, req)
+
+	if !nextCalled {
+		t.Fatal("expected next handler to be called")
+	}
+	if errorHandlerCalled {
+		t.Fatal("expected error handler not to be called")
+	}
+	if successHandlerCalled {
+		t.Fatal("expected success handler not to be called")
+	}
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", rec.Code)
 	}
 }
 
@@ -153,11 +300,15 @@ func TestMiddleware_WithSkipAuthPaths(t *testing.T) {
 	}
 
 	errorHandlerCalled := false
+	successHandlerCalled := false
 	mw := NewMiddleware(client,
 		WithSkipAuthPaths([]string{"", "/health", "/metrics", "/health"}),
 		WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err *AuthError) {
 			errorHandlerCalled = true
 			w.WriteHeader(err.HTTPStatus)
+		}),
+		WithSuccessHandler(func(w http.ResponseWriter, r *http.Request, apiKey string, resp ValidateResponse) {
+			successHandlerCalled = true
 		}),
 	)
 
@@ -186,6 +337,7 @@ func TestMiddleware_WithSkipAuthPaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			errorHandlerCalled = false
+			successHandlerCalled = false
 			nextCalled := false
 			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				nextCalled = true
@@ -205,6 +357,9 @@ func TestMiddleware_WithSkipAuthPaths(t *testing.T) {
 			}
 			if errorHandlerCalled {
 				t.Fatal("expected error handler not to be called")
+			}
+			if successHandlerCalled {
+				t.Fatal("expected success handler not to be called")
 			}
 			if rec.Code != http.StatusNoContent {
 				t.Fatalf("expected status 204, got %d", rec.Code)

@@ -116,21 +116,21 @@ func loadDefaultClient() *Client {
 }
 
 // Validate uses the default Client to validate an API key.
-func Validate(ctx context.Context, apiKey string, scope string) (ValidateResponse, error) {
+func Validate(ctx context.Context, apiKey string, scope ...string) (ValidateResponse, error) {
 	c := loadDefaultClient()
 	if c == nil {
 		panic("cpauth: default client not initialized")
 	}
-	return c.Validate(ctx, apiKey, scope)
+	return c.Validate(ctx, apiKey, scope...)
 }
 
 // ValidateFromRequest uses the default Client to validate an API key extracted from the request header CP-X-API-KEY.
-func ValidateFromRequest(r *http.Request, scope string) (ValidateResponse, error) {
+func ValidateFromRequest(r *http.Request, scope ...string) (ValidateResponse, error) {
 	c := loadDefaultClient()
 	if c == nil {
 		panic("cpauth: default client not initialized")
 	}
-	return c.ValidateFromRequest(r, scope)
+	return c.ValidateFromRequest(r, scope...)
 }
 
 // Client communicates with the remote cp-api-auth service.
@@ -156,8 +156,8 @@ func MustNewClient(cfg Config) *Client {
 }
 
 // Validate calls POST /v1/validate and returns the parsed data or an AuthError.
-func (c *Client) Validate(ctx context.Context, apiKey string, scope string) (ValidateResponse, error) {
-	reqBody, err := json.Marshal(ValidateRequest{APIKey: apiKey, Scope: scope})
+func (c *Client) Validate(ctx context.Context, apiKey string, scope ...string) (ValidateResponse, error) {
+	reqBody, err := json.Marshal(ValidateRequest{APIKey: apiKey, Scope: resolveScope(c.config.Scope, scope...)})
 	if err != nil {
 		return ValidateResponse{}, &AuthError{
 			Code:       CodeInternalServerError,
@@ -246,8 +246,9 @@ func (c *Client) Validate(ctx context.Context, apiKey string, scope string) (Val
 }
 
 // ValidateFromRequest extracts the API key from the request header CP-X-API-KEY and validates it.
-func (c *Client) ValidateFromRequest(r *http.Request, scope string) (ValidateResponse, error) {
-	apiKey := extractAPIKey(r, scope)
+func (c *Client) ValidateFromRequest(r *http.Request, scope ...string) (ValidateResponse, error) {
+	resolvedScope := resolveScope(c.config.Scope, scope...)
+	apiKey := extractAPIKey(r, resolvedScope)
 	if apiKey == "" {
 		return ValidateResponse{}, &AuthError{
 			Code:       CodeInvalidAPIKey,
@@ -255,5 +256,12 @@ func (c *Client) ValidateFromRequest(r *http.Request, scope string) (ValidateRes
 			HTTPStatus: http.StatusUnauthorized,
 		}
 	}
-	return c.Validate(r.Context(), apiKey, scope)
+	return c.Validate(r.Context(), apiKey, resolvedScope)
+}
+
+func resolveScope(defaultScope string, scope ...string) string {
+	if len(scope) > 0 {
+		return scope[0]
+	}
+	return defaultScope
 }

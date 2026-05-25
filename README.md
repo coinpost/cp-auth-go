@@ -190,6 +190,14 @@ r.Use(cpauth.Auth(cpauth.WithErrorHandler(func(w http.ResponseWriter, r *http.Re
     w.WriteHeader(err.HTTPStatus)
     json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Message})
 })))
+
+// With success hook for audit/logging; next handler still runs afterward.
+r.Use(cpauth.Auth(cpauth.WithSuccessHandler(func(w http.ResponseWriter, r *http.Request, apiKey string, resp cpauth.ValidateResponse) {
+    log.Printf("authenticated api_key=%s owner=%s scopes=%v", apiKey, resp.Owner, resp.Scopes)
+})))
+
+// Ignore authentication errors and continue to the next handler.
+r.Use(cpauth.Auth(cpauth.WithIgnoreError()))
 ```
 
 ### Per-client middleware
