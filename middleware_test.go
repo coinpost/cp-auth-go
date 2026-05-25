@@ -143,6 +143,164 @@ func TestMiddleware_RemoteError(t *testing.T) {
 	}
 }
 
+func TestMiddleware_WithSkipAuthPaths(t *testing.T) {
+	client, err := NewClient(Config{
+		BaseURL:    "http://localhost:9999/v1/",
+		HTTPClient: http.DefaultClient,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	errorHandlerCalled := false
+	mw := NewMiddleware(client,
+		WithSkipAuthPaths([]string{"", "/health", "/metrics", "/health"}),
+		WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err *AuthError) {
+			errorHandlerCalled = true
+			w.WriteHeader(err.HTTPStatus)
+		}),
+	)
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{
+			name: "same path",
+			path: "/health",
+		},
+		{
+			name: "suffix path",
+			path: "/api/health",
+		},
+		{
+			name: "query ignored",
+			path: "/api/health?ready=1",
+		},
+		{
+			name: "second skipped path",
+			path: "/internal/metrics",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errorHandlerCalled = false
+			nextCalled := false
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				nextCalled = true
+				if _, ok := ValidateResponseFromContext(r.Context()); ok {
+					t.Fatal("expected skipped request to have no validate response in context")
+				}
+				w.WriteHeader(http.StatusNoContent)
+			})
+
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			rec := httptest.NewRecorder()
+
+			mw.Handler(next).ServeHTTP(rec, req)
+
+			if !nextCalled {
+				t.Fatal("expected next handler to be called")
+			}
+			if errorHandlerCalled {
+				t.Fatal("expected error handler not to be called")
+			}
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("expected status 204, got %d", rec.Code)
+			}
+		})
+	}
+}
+
+func TestMiddleware_WithSkipAuthPaths_SkipsRemoteValidationEvenWithAPIKey(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("remote should not be called")
+	}))
+	defer remote.Close()
+
+	client, err := NewClient(Config{
+		BaseURL:    remote.URL + "/v1/",
+		HTTPClient: http.DefaultClient,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	mw := NewMiddleware(client, WithSkipAuthPaths([]string{"/health"}))
+
+	nextCalled := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		if _, ok := ValidateResponseFromContext(r.Context()); ok {
+			t.Fatal("expected skipped request to have no validate response in context")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req.Header.Set("CP-X-API-KEY", "good-key")
+	rec := httptest.NewRecorder()
+
+	mw.Handler(next).ServeHTTP(rec, req)
+
+	if !nextCalled {
+		t.Fatal("expected next handler to be called")
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected status 204, got %d", rec.Code)
+	}
+}
+
+func TestMiddleware_WithSkipAuthPaths_NonMatchingPathRequiresAuth(t *testing.T) {
+	client, err := NewClient(Config{
+		BaseURL:    "http://localhost:9999/v1/",
+		HTTPClient: http.DefaultClient,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	mw := NewMiddleware(client, WithSkipAuthPaths([]string{"/health"}))
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{
+			name: "similar prefix",
+			path: "/healthz",
+		},
+		{
+			name: "trailing slash",
+			path: "/health/",
+		},
+		{
+			name: "empty path ignored",
+			path: "/",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nextCalled := false
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				nextCalled = true
+			})
+
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			rec := httptest.NewRecorder()
+
+			mw.Handler(next).ServeHTTP(rec, req)
+
+			if nextCalled {
+				t.Fatal("expected next handler NOT to be called")
+			}
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("expected status 401, got %d", rec.Code)
+			}
+		})
+	}
+}
+
 func TestAuth_MissingHeader(t *testing.T) {
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("remote should not be called")

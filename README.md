@@ -173,10 +173,12 @@ The `feedstream` scope reads `X-FEEDSTREAM-KEY` from the request header, then fr
 
 ```go
 client, _ := cpauth.NewClient(cpauth.Config{BaseURL: "https://auth.example.com/v1/"})
-mw := cpauth.NewMiddleware(client)
+mw := cpauth.NewMiddleware(client, cpauth.WithSkipAuthPaths([]string{"/health", "/metrics"}))
 
 mux.Handle("/api/data", mw.Handler(http.HandlerFunc(dataHandler)))
 ```
+
+`WithSkipAuthPaths` matches URL path suffixes, so `/api/health` matches `/health`.
 
 ### Router style (chi, gorilla, etc.)
 

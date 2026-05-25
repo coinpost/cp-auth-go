@@ -3,13 +3,15 @@ package cpauth
 import (
 	"context"
 	"net/http"
+	"strings"
 )
 
 // Middleware is the authentication middleware for net/http.
 type Middleware struct {
-	client       *Client
-	errorHandler ErrorHandler
-	scope        string
+	client        *Client
+	errorHandler  ErrorHandler
+	scope         string
+	skipAuthPaths map[string]struct{}
 }
 
 // MiddlewareOption configures Middleware.
@@ -28,6 +30,24 @@ func WithErrorHandler(fn ErrorHandler) MiddlewareOption {
 func WithScope(scope string) MiddlewareOption {
 	return func(m *Middleware) {
 		m.scope = scope
+	}
+}
+
+// WithSkipAuthPaths sets route path suffixes that bypass authentication.
+func WithSkipAuthPaths(paths []string) MiddlewareOption {
+	return func(m *Middleware) {
+		if len(paths) == 0 {
+			return
+		}
+		if m.skipAuthPaths == nil {
+			m.skipAuthPaths = make(map[string]struct{}, len(paths))
+		}
+		for _, path := range paths {
+			if path == "" {
+				continue
+			}
+			m.skipAuthPaths[path] = struct{}{}
+		}
 	}
 }
 
@@ -59,6 +79,11 @@ func DefaultMiddleware(opts ...MiddlewareOption) *Middleware {
 // Handler wraps an http.Handler with API key authentication.
 func (m *Middleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if m.shouldSkipAuth(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		apiKey := extractAPIKey(r, m.scope)
 		if apiKey == "" {
 			m.errorHandler(w, r, &AuthError{
@@ -86,6 +111,15 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 		r = r.WithContext(context.WithValue(r.Context(), validateResponseCtxKey, resp))
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (m *Middleware) shouldSkipAuth(path string) bool {
+	for skipPath := range m.skipAuthPaths {
+		if strings.HasSuffix(path, skipPath) {
+			return true
+		}
+	}
+	return false
 }
 
 // HandlerFunc is a convenience wrapper for http.HandlerFunc.
