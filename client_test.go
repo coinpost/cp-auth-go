@@ -193,6 +193,12 @@ func TestClient_ValidateFromRequest_ExtractsHeader(t *testing.T) {
 		if req.APIKey != "test-api-key" {
 			t.Fatalf("expected api_key 'test-api-key', got %q", req.APIKey)
 		}
+		if req.HTTPMethod != http.MethodGet {
+			t.Fatalf("expected http_method %q, got %q", http.MethodGet, req.HTTPMethod)
+		}
+		if req.URLPath != "/api/data" {
+			t.Fatalf("expected url_path %q, got %q", "/api/data", req.URLPath)
+		}
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(validateEnvelope{
 			Code:    0,
@@ -226,6 +232,98 @@ func TestClient_ValidateFromRequest_ExtractsHeader(t *testing.T) {
 	}
 	if resp.ID != "id-123" {
 		t.Fatalf("expected id 'id-123', got %q", resp.ID)
+	}
+}
+
+func TestClient_ValidateFromRequest_SendsPathWithoutQuery(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req ValidateRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+		if req.HTTPMethod != http.MethodPost {
+			t.Fatalf("expected http_method %q, got %q", http.MethodPost, req.HTTPMethod)
+		}
+		if req.URLPath != "/api/data" {
+			t.Fatalf("expected url_path %q, got %q", "/api/data", req.URLPath)
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(validateEnvelope{
+			Code:    0,
+			Message: "ok",
+			Data: ValidateResponse{
+				Valid: true,
+				ID:    "id-path",
+				Owner: "owner",
+			},
+		})
+	}))
+	defer remote.Close()
+
+	client, err := NewClient(Config{
+		BaseURL:    remote.URL + "/v1/",
+		HTTPClient: http.DefaultClient,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/data?x=1", nil)
+	req.Header.Set("CP-X-API-KEY", "test-api-key")
+	resp, err := client.ValidateFromRequest(req, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ID != "id-path" {
+		t.Fatalf("expected id 'id-path', got %q", resp.ID)
+	}
+}
+
+func TestClient_ValidateFromRequest_PrefersMethodAndPathHeaders(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req ValidateRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+		if req.HTTPMethod != http.MethodGet {
+			t.Fatalf("expected http_method %q, got %q", http.MethodGet, req.HTTPMethod)
+		}
+		if req.URLPath != "/v1/jobs/old" {
+			t.Fatalf("expected url_path %q, got %q", "/v1/jobs/old", req.URLPath)
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(validateEnvelope{
+			Code:    0,
+			Message: "ok",
+			Data: ValidateResponse{
+				Valid: true,
+				ID:    "id-header-path",
+				Owner: "owner",
+			},
+		})
+	}))
+	defer remote.Close()
+
+	client, err := NewClient(Config{
+		BaseURL:    remote.URL + "/v1/",
+		HTTPClient: http.DefaultClient,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/proxy/validate?x=1", nil)
+	req.Header.Set("CP-X-API-KEY", "test-api-key")
+	req.Header.Set("http_method", http.MethodGet)
+	req.Header.Set("url_path", "/v1/jobs/old")
+	resp, err := client.ValidateFromRequest(req, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ID != "id-header-path" {
+		t.Fatalf("expected id 'id-header-path', got %q", resp.ID)
 	}
 }
 
@@ -401,6 +499,12 @@ func TestClient_Validate_ScopePassed(t *testing.T) {
 		}
 		if req.Scope != "terminal" {
 			t.Fatalf("expected scope 'terminal', got %q", req.Scope)
+		}
+		if req.HTTPMethod != "" {
+			t.Fatalf("expected empty http_method, got %q", req.HTTPMethod)
+		}
+		if req.URLPath != "" {
+			t.Fatalf("expected empty url_path, got %q", req.URLPath)
 		}
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(validateEnvelope{

@@ -164,6 +164,7 @@ Reads `CP-X-API-KEY` from the request header automatically:
 resp, err := cpauth.ValidateFromRequest(r)
 ```
 
+`ValidateFromRequest` also sends `http_method` and `url_path` to cp-api-auth. These values are read from request headers named `http_method` and `url_path`; if those headers are absent, the SDK falls back to the current request method and path-only URL.
 For legacy fallback, pass a scope such as `terminal`, `sourcefinder`, or `feedstream`.
 The `feedstream` scope reads `X-FEEDSTREAM-KEY` from the request header, then from the URL query parameter with the same name.
 
@@ -179,6 +180,7 @@ mux.Handle("/api/data", mw.Handler(http.HandlerFunc(dataHandler)))
 ```
 
 `WithSkipAuthPaths` matches URL path suffixes, so `/api/health` matches `/health`.
+Authenticated middleware requests send `http_method` and `url_path` to cp-api-auth. These values are read from request headers named `http_method` and `url_path`; if those headers are absent, the SDK falls back to the current request method and path-only URL.
 
 ### Router style (chi, gorilla, etc.)
 

@@ -60,6 +60,12 @@ func TestMiddleware_ValidKey(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(validateEnvelope{Code: 1002, Message: "invalid key"})
 			return
 		}
+		if req.HTTPMethod != http.MethodPatch {
+			t.Fatalf("expected http_method %q, got %q", http.MethodPatch, req.HTTPMethod)
+		}
+		if req.URLPath != "/v1/jobs/old" {
+			t.Fatalf("expected url_path %q, got %q", "/v1/jobs/old", req.URLPath)
+		}
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(validateEnvelope{
 			Code:    0,
@@ -111,6 +117,8 @@ func TestMiddleware_ValidKey(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
 	req.Header.Set("CP-X-API-KEY", "good-key")
+	req.Header.Set("http_method", http.MethodPatch)
+	req.Header.Set("url_path", "/v1/jobs/old")
 	rec := httptest.NewRecorder()
 
 	mw.Handler(next).ServeHTTP(rec, req)

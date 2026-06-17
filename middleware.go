@@ -120,7 +120,7 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		resp, err := m.client.Validate(r.Context(), apiKey, m.scope)
+		resp, err := m.client.validateRequest(r.Context(), apiKey, m.scope, extractHTTPMethod(r), extractURLPath(r))
 		if err != nil {
 			if m.ignoreError {
 				next.ServeHTTP(w, r)

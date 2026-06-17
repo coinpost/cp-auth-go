@@ -18,6 +18,8 @@ const (
 	headerLegacyCpTerminal   = "X-CP-TERMINAL-API-KEY"
 	headerLegacySourceFinder = "X-SOURCEFINDER-KEY"
 	headerLegacyFeedstream   = "X-FEEDSTREAM-KEY"
+	headerHTTPMethod         = "http_method"
+	headerURLPath            = "url_path"
 
 	scopeTerminal     = "terminal"
 	scopeSourceFinder = "sourcefinder"
@@ -68,6 +70,20 @@ func extractAPIKey(r *http.Request, scope string) string {
 		return r.URL.Query().Get(headerLegacyFeedstream)
 	}
 	return ""
+}
+
+func extractHTTPMethod(r *http.Request) string {
+	if v := r.Header.Get(headerHTTPMethod); v != "" {
+		return v
+	}
+	return r.Method
+}
+
+func extractURLPath(r *http.Request) string {
+	if v := r.Header.Get(headerURLPath); v != "" {
+		return v
+	}
+	return r.URL.Path
 }
 
 var defaultClient atomic.Pointer[Client]
@@ -157,7 +173,11 @@ func MustNewClient(cfg Config) *Client {
 
 // Validate calls POST /v1/validate and returns the parsed data or an AuthError.
 func (c *Client) Validate(ctx context.Context, apiKey string, scope ...string) (ValidateResponse, error) {
-	reqBody, err := json.Marshal(ValidateRequest{APIKey: apiKey, Scope: resolveScope(c.config.Scope, scope...)})
+	return c.validate(ctx, ValidateRequest{APIKey: apiKey, Scope: resolveScope(c.config.Scope, scope...)})
+}
+
+func (c *Client) validate(ctx context.Context, validateReq ValidateRequest) (ValidateResponse, error) {
+	reqBody, err := json.Marshal(validateReq)
 	if err != nil {
 		return ValidateResponse{}, &AuthError{
 			Code:       CodeInternalServerError,
@@ -245,6 +265,15 @@ func (c *Client) Validate(ctx context.Context, apiKey string, scope ...string) (
 	return envelope.Data, nil
 }
 
+func (c *Client) validateRequest(ctx context.Context, apiKey, scope, httpMethod, urlPath string) (ValidateResponse, error) {
+	return c.validate(ctx, ValidateRequest{
+		APIKey:     apiKey,
+		Scope:      scope,
+		HTTPMethod: httpMethod,
+		URLPath:    urlPath,
+	})
+}
+
 // ValidateFromRequest extracts the API key from the request header CP-X-API-KEY and validates it.
 func (c *Client) ValidateFromRequest(r *http.Request, scope ...string) (ValidateResponse, error) {
 	resolvedScope := resolveScope(c.config.Scope, scope...)
@@ -256,7 +285,7 @@ func (c *Client) ValidateFromRequest(r *http.Request, scope ...string) (Validate
 			HTTPStatus: http.StatusUnauthorized,
 		}
 	}
-	return c.Validate(r.Context(), apiKey, resolvedScope)
+	return c.validateRequest(r.Context(), apiKey, resolvedScope, extractHTTPMethod(r), extractURLPath(r))
 }
 
 func resolveScope(defaultScope string, scope ...string) string {
