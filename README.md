@@ -5,6 +5,7 @@ Go SDK for the cp-api-auth service. Provides API key validation via HTTP and rea
 ## Features
 
 - **API key validation** via remote auth service
+- **Local-first API key validation** with remote fallback
 - **Middleware** for `net/http` and routers like chi/gorilla
 - **Direct validation** from request headers without middleware
 - **Structured errors** with business codes and HTTP status mapping
@@ -112,7 +113,27 @@ func ginAuth(mw func(http.Handler) http.Handler) gin.HandlerFunc {
 
 ## Configuration
 
-`BaseURL` is **required**. There is no hardcoded default.
+`BaseURL` is **required** when authentication is enabled. There is no hardcoded default.
+
+The SDK config can be mapped from a `cp_auth` block:
+
+```yaml
+cp_auth:
+  enabled: false
+  cp_auth_base_url: "http://127.0.0.1:8030/v1"
+  local:
+    name: "test-key"
+    description: "only for testing env"
+    api_key: "xxx"
+```
+
+Set `local.api_key` to enable local-first validation. If the incoming API key
+matches `local.api_key`, validation succeeds without calling the remote auth
+service. If `local.api_key` is empty or does not match, the SDK falls back to
+remote validation.
+
+If `enabled` is omitted, authentication is enabled. If `enabled` is explicitly
+set to `false`, middleware bypasses authentication.
 
 ### From environment variables
 
@@ -125,7 +146,12 @@ cpauth.InitFromEnv() // reads CP_AUTH_BASE_URL
 ```go
 // Returns error
 _ = cpauth.SetDefault(cpauth.Config{
-    BaseURL:    "https://auth.example.com/v1/",
+    BaseURL: "https://auth.example.com/v1/",
+    Local: cpauth.LocalConfig{
+        Name:        "test-key",
+        Description: "only for testing env",
+        APIKey:      "local-dev-key",
+    },
     HTTPClient: &http.Client{Timeout: 5 * time.Second},
 })
 

@@ -42,6 +42,34 @@ func TestMiddleware_MissingHeader(t *testing.T) {
 	}
 }
 
+func TestMiddleware_DisabledCallsNextWithoutHeader(t *testing.T) {
+	enabled := false
+	client, err := NewClient(Config{
+		Enabled: &enabled,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	nextCalled := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusAccepted)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	rec := httptest.NewRecorder()
+
+	NewMiddleware(client).Handler(next).ServeHTTP(rec, req)
+
+	if !nextCalled {
+		t.Fatal("expected next handler to be called")
+	}
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", rec.Code)
+	}
+}
+
 func TestMiddleware_ValidKey(t *testing.T) {
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/validate" {

@@ -101,6 +101,11 @@ func DefaultMiddleware(opts ...MiddlewareOption) *Middleware {
 // Handler wraps an http.Handler with API key authentication.
 func (m *Middleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !m.client.authEnabled() {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		if m.shouldSkipAuth(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return

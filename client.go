@@ -3,6 +3,7 @@ package cpauth
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -173,10 +174,20 @@ func MustNewClient(cfg Config) *Client {
 
 // Validate calls POST /v1/validate and returns the parsed data or an AuthError.
 func (c *Client) Validate(ctx context.Context, apiKey string, scope ...string) (ValidateResponse, error) {
+	if !c.authEnabled() {
+		return c.disabledResponse(), nil
+	}
 	return c.validate(ctx, ValidateRequest{APIKey: apiKey, Scope: resolveScope(c.config.Scope, scope...)})
 }
 
 func (c *Client) validate(ctx context.Context, validateReq ValidateRequest) (ValidateResponse, error) {
+	if !c.authEnabled() {
+		return c.disabledResponse(), nil
+	}
+	if resp, ok := c.validateLocal(validateReq); ok {
+		return resp, nil
+	}
+
 	reqBody, err := json.Marshal(validateReq)
 	if err != nil {
 		return ValidateResponse{}, &AuthError{
@@ -265,6 +276,38 @@ func (c *Client) validate(ctx context.Context, validateReq ValidateRequest) (Val
 	return envelope.Data, nil
 }
 
+func (c *Client) validateLocal(validateReq ValidateRequest) (ValidateResponse, bool) {
+	configuredAPIKey := c.config.Local.APIKey
+	if configuredAPIKey == "" || subtle.ConstantTimeCompare([]byte(validateReq.APIKey), []byte(configuredAPIKey)) != 1 {
+		return ValidateResponse{}, false
+	}
+	owner := c.config.Local.Name
+	if owner == "" {
+		owner = "local"
+	}
+	resp := ValidateResponse{
+		Valid: true,
+		ID:    owner,
+		Owner: owner,
+	}
+	if validateReq.Scope != "" {
+		resp.Scopes = []string{validateReq.Scope}
+	}
+	return resp, true
+}
+
+func (c *Client) authEnabled() bool {
+	return c.config.authEnabled()
+}
+
+func (c *Client) disabledResponse() ValidateResponse {
+	return ValidateResponse{
+		Valid: true,
+		ID:    "disabled",
+		Owner: "disabled",
+	}
+}
+
 func (c *Client) validateRequest(ctx context.Context, apiKey, scope, httpMethod, urlPath string) (ValidateResponse, error) {
 	return c.validate(ctx, ValidateRequest{
 		APIKey:     apiKey,
@@ -276,6 +319,9 @@ func (c *Client) validateRequest(ctx context.Context, apiKey, scope, httpMethod,
 
 // ValidateFromRequest extracts the API key from the request header CP-X-API-KEY and validates it.
 func (c *Client) ValidateFromRequest(r *http.Request, scope ...string) (ValidateResponse, error) {
+	if !c.authEnabled() {
+		return c.disabledResponse(), nil
+	}
 	resolvedScope := resolveScope(c.config.Scope, scope...)
 	apiKey := extractAPIKey(r, resolvedScope)
 	if apiKey == "" {

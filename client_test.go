@@ -82,6 +82,16 @@ func TestNewClient_InvalidBaseURL(t *testing.T) {
 	}
 }
 
+func TestNewClient_DisabledAllowsMissingBaseURL(t *testing.T) {
+	enabled := false
+	_, err := NewClient(Config{
+		Enabled: &enabled,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestClient_Validate_DataValidFalse(t *testing.T) {
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -151,6 +161,157 @@ func TestClient_Validate_Non2xxNonJSON(t *testing.T) {
 	}
 	if authErr.HTTPStatus != http.StatusServiceUnavailable {
 		t.Fatalf("expected http status %d, got %d", http.StatusServiceUnavailable, authErr.HTTPStatus)
+	}
+}
+
+func TestClient_Validate_LocalConfigAPIKeyMatchSkipsRemote(t *testing.T) {
+	remoteCalled := false
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		remoteCalled = true
+		t.Fatal("remote should not be called")
+	}))
+	defer remote.Close()
+
+	client, err := NewClient(Config{
+		BaseURL: remote.URL + "/v1/",
+		Local: LocalConfig{
+			Name:   "test-key",
+			APIKey: "local-key",
+		},
+		Scope:      "terminal",
+		HTTPClient: http.DefaultClient,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp, err := client.Validate(t.Context(), "local-key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if remoteCalled {
+		t.Fatal("expected remote to be skipped")
+	}
+	if !resp.Valid {
+		t.Fatal("expected local response valid=true")
+	}
+	if resp.ID != "test-key" {
+		t.Fatalf("expected local id, got %q", resp.ID)
+	}
+	if resp.Owner != "test-key" {
+		t.Fatalf("expected local owner, got %q", resp.Owner)
+	}
+	if len(resp.Scopes) != 1 || resp.Scopes[0] != "terminal" {
+		t.Fatalf("expected terminal scope, got %#v", resp.Scopes)
+	}
+}
+
+func TestClient_Validate_LocalConfigAPIKeyMismatchFallsBackRemote(t *testing.T) {
+	remoteCalled := false
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		remoteCalled = true
+		body, _ := io.ReadAll(r.Body)
+		var req ValidateRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+		if req.APIKey != "remote-key" {
+			t.Fatalf("expected remote-key, got %q", req.APIKey)
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(validateEnvelope{
+			Code:    0,
+			Message: "ok",
+			Data: ValidateResponse{
+				Valid: true,
+				ID:    "remote-id",
+				Owner: "remote-owner",
+			},
+		})
+	}))
+	defer remote.Close()
+
+	client, err := NewClient(Config{
+		BaseURL: remote.URL + "/v1/",
+		Local: LocalConfig{
+			APIKey: "local-key",
+		},
+		HTTPClient: http.DefaultClient,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp, err := client.Validate(t.Context(), "remote-key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !remoteCalled {
+		t.Fatal("expected remote fallback to be called")
+	}
+	if resp.ID != "remote-id" {
+		t.Fatalf("expected remote response, got id %q", resp.ID)
+	}
+}
+
+func TestClient_Validate_LocalConfigAPIKeyUnsetFallsBackRemote(t *testing.T) {
+	remoteCalled := false
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		remoteCalled = true
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(validateEnvelope{
+			Code:    0,
+			Message: "ok",
+			Data: ValidateResponse{
+				Valid: true,
+				ID:    "remote-id",
+				Owner: "remote-owner",
+			},
+		})
+	}))
+	defer remote.Close()
+
+	client, err := NewClient(Config{
+		BaseURL:    remote.URL + "/v1/",
+		HTTPClient: http.DefaultClient,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	_, err = client.Validate(t.Context(), "any-key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !remoteCalled {
+		t.Fatal("expected remote fallback to be called")
+	}
+}
+
+func TestClient_Validate_DisabledSkipsRemote(t *testing.T) {
+	enabled := false
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("remote should not be called")
+	}))
+	defer remote.Close()
+
+	client, err := NewClient(Config{
+		Enabled: &enabled,
+		BaseURL: remote.URL + "/v1/",
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp, err := client.Validate(t.Context(), "any-key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.Valid {
+		t.Fatal("expected disabled response valid=true")
+	}
+	if resp.ID != "disabled" {
+		t.Fatalf("expected disabled id, got %q", resp.ID)
 	}
 }
 
