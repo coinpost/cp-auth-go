@@ -4,20 +4,11 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"time"
 
 	cpauth "github.com/coinpost/cp-auth-go"
 )
 
 func main() {
-	// Initialize the SDK. Options:
-	//   1. cpauth.InitFromEnv()          // reads CP_AUTH_BASE_URL from environment
-	//   2. cpauth.SetDefault(cfg)        // explicit configuration
-	_ = cpauth.SetDefault(cpauth.Config{
-		BaseURL:    "https://auth.example.com/v1/",
-		HTTPClient: &http.Client{Timeout: 10 * time.Second},
-	})
-
 	// --- Standard library style ---
 	// Build a Middleware instance and wrap handlers individually.
 	// Use WithScope to enable legacy fallback (e.g. "terminal", "sourcefinder", or "feedstream").

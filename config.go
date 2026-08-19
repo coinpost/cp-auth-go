@@ -68,3 +68,12 @@ func (c *Config) setDefaults() error {
 func (c Config) authEnabled() bool {
 	return c.Enabled == nil || *c.Enabled
 }
+
+func (c Config) configured() bool {
+	return c.Enabled != nil ||
+		c.BaseURL != "" ||
+		c.Scope != "" ||
+		c.Local.Name != "" ||
+		c.Local.Description != "" ||
+		c.Local.APIKey != ""
+}

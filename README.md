@@ -28,18 +28,12 @@ package main
 import (
     "log"
     "net/http"
-    "time"
 
     cpauth "github.com/coinpost/cp-auth-go"
     "github.com/go-chi/chi/v5"
 )
 
 func main() {
-    _ = cpauth.SetDefault(cpauth.Config{
-        BaseURL:    "https://auth.example.com/v1/",
-        HTTPClient: &http.Client{Timeout: 10 * time.Second},
-    })
-
     r := chi.NewRouter()
     r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
         w.Write([]byte(`{"status":"ok"}`))
@@ -66,18 +60,12 @@ package main
 
 import (
     "net/http"
-    "time"
 
     cpauth "github.com/coinpost/cp-auth-go"
     "github.com/gin-gonic/gin"
 )
 
 func main() {
-    _ = cpauth.SetDefault(cpauth.Config{
-        BaseURL:    "https://auth.example.com/v1/",
-        HTTPClient: &http.Client{Timeout: 10 * time.Second},
-    })
-
     r := gin.Default()
     r.GET("/health", func(c *gin.Context) {
         c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -113,7 +101,23 @@ func ginAuth(mw func(http.Handler) http.Handler) gin.HandlerFunc {
 
 ## Configuration
 
-`BaseURL` is **required** when authentication is enabled. There is no hardcoded default.
+The default client loads its own config from a YAML file when `Auth`,
+`DefaultMiddleware`, `Validate`, or `ValidateFromRequest` is first used.
+
+By default, the SDK reads the first existing file from:
+
+- `config.yaml`
+- `config.yml`
+- `application.yaml`
+- `application.yml`
+- `config/config.yaml`
+- `config/config.yml`
+- `configs/config.yaml`
+- `configs/config.yml`
+
+Set `CP_AUTH_CONFIG` to use a specific file path.
+
+`cp_auth_base_url` is **required** when authentication is enabled. There is no hardcoded default.
 
 The SDK config can be mapped from a `cp_auth` block:
 
@@ -135,16 +139,20 @@ remote validation.
 If `enabled` is omitted, authentication is enabled. If `enabled` is explicitly
 set to `false`, middleware bypasses authentication.
 
-### From environment variables
+### Load Explicitly
 
 ```go
-cpauth.InitFromEnv() // reads CP_AUTH_BASE_URL
+// Optional. Auth() and Validate() call this automatically when the default client is unset.
+_ = cpauth.InitFromDefaultConfig()
+
+// Or load a specific file.
+_ = cpauth.InitFromFile("config.yaml")
 ```
 
 ### Explicit configuration
 
 ```go
-// Returns error
+// This is only needed when callers want to override file-based configuration.
 _ = cpauth.SetDefault(cpauth.Config{
     BaseURL: "https://auth.example.com/v1/",
     Local: cpauth.LocalConfig{
@@ -295,6 +303,7 @@ type ValidateResponse struct {
 ## Thread Safety
 
 - `defaultClient` is protected by `atomic.Pointer[Client]`
+- The default client is loaded lazily from config if callers do not set it explicitly
 - `SetDefault` / `MustSetDefault` are safe to call during initialization
 - Individual `*Client` instances should not be mutated after creation
 
@@ -308,7 +317,7 @@ See the [`example/`](example/) directory:
 
 ## Security Notes
 
-- `BaseURL` must be configured explicitly. There is no default endpoint.
+- `cp_auth_base_url` must be configured explicitly when authentication is enabled. There is no default endpoint.
 - Always prefer HTTPS in production.
 - The SDK does not log or persist API keys.
 

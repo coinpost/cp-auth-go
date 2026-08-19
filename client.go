@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -87,7 +88,10 @@ func extractURLPath(r *http.Request) string {
 	return r.URL.Path
 }
 
-var defaultClient atomic.Pointer[Client]
+var (
+	defaultClient   atomic.Pointer[Client]
+	defaultClientMu sync.Mutex
+)
 
 // InitFromEnv initializes the default Client from environment variables.
 // Recognized variables:
@@ -132,21 +136,40 @@ func loadDefaultClient() *Client {
 	return defaultClient.Load()
 }
 
+func loadOrInitDefaultClient() (*Client, error) {
+	if c := loadDefaultClient(); c != nil {
+		return c, nil
+	}
+
+	defaultClientMu.Lock()
+	defer defaultClientMu.Unlock()
+
+	if c := loadDefaultClient(); c != nil {
+		return c, nil
+	}
+	if err := InitFromDefaultConfig(); err != nil {
+		return nil, err
+	}
+	return loadDefaultClient(), nil
+}
+
+func mustLoadDefaultClient() *Client {
+	c, err := loadOrInitDefaultClient()
+	if err != nil {
+		panic(fmt.Sprintf("cpauth: default client not initialized: %v", err))
+	}
+	return c
+}
+
 // Validate uses the default Client to validate an API key.
 func Validate(ctx context.Context, apiKey string, scope ...string) (ValidateResponse, error) {
-	c := loadDefaultClient()
-	if c == nil {
-		panic("cpauth: default client not initialized")
-	}
+	c := mustLoadDefaultClient()
 	return c.Validate(ctx, apiKey, scope...)
 }
 
 // ValidateFromRequest uses the default Client to validate an API key extracted from the request header CP-X-API-KEY.
 func ValidateFromRequest(r *http.Request, scope ...string) (ValidateResponse, error) {
-	c := loadDefaultClient()
-	if c == nil {
-		panic("cpauth: default client not initialized")
-	}
+	c := mustLoadDefaultClient()
 	return c.ValidateFromRequest(r, scope...)
 }
 

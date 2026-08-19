@@ -91,10 +91,7 @@ func NewMiddleware(client *Client, opts ...MiddlewareOption) *Middleware {
 
 // DefaultMiddleware creates a Middleware using the default Client.
 func DefaultMiddleware(opts ...MiddlewareOption) *Middleware {
-	c := loadDefaultClient()
-	if c == nil {
-		panic("cpauth: default client not initialized")
-	}
+	c := mustLoadDefaultClient()
 	return NewMiddleware(c, opts...)
 }
 
@@ -173,10 +170,7 @@ func (m *Middleware) HandlerFunc(next http.HandlerFunc) http.HandlerFunc {
 //	    // custom error response
 //	})))
 func Auth(opts ...MiddlewareOption) func(http.Handler) http.Handler {
-	c := loadDefaultClient()
-	if c == nil {
-		panic("cpauth: default client not initialized")
-	}
+	c := mustLoadDefaultClient()
 	return NewMiddleware(c, opts...).Handler
 }
 

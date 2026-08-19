@@ -11,12 +11,6 @@ import (
 )
 
 func main() {
-	// Initialize SDK.
-	_ = cpauth.SetDefault(cpauth.Config{
-		BaseURL:    "https://auth.example.com/v1/",
-		HTTPClient: &http.Client{Timeout: 10 * time.Second},
-	})
-
 	// Dedicated client for a specific tenant (multi-tenant example).
 	tenantClient, err := cpauth.NewClient(cpauth.Config{
 		BaseURL:    "https://auth-tenant-b.example.com/v1/",
