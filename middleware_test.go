@@ -134,6 +134,13 @@ func TestMiddleware_ValidKey(t *testing.T) {
 		if ctxResp.ID != resp.ID {
 			t.Fatalf("expected context response id %q, got %q", resp.ID, ctxResp.ID)
 		}
+		mode, ok := ValidateModeFromContext(r.Context())
+		if !ok {
+			t.Fatal("expected validate mode in success handler request context")
+		}
+		if mode != ValidateModeRemote {
+			t.Fatalf("expected remote validate mode, got %q", mode)
+		}
 	}))
 
 	nextCalled := false
@@ -157,6 +164,45 @@ func TestMiddleware_ValidKey(t *testing.T) {
 	if successHandlerCalled != 1 {
 		t.Fatalf("expected success handler to be called once, got %d", successHandlerCalled)
 	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+}
+
+func TestMiddleware_LocalValidateModeFromContext(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("remote should not be called")
+	}))
+	defer remote.Close()
+
+	client, err := NewClient(Config{
+		BaseURL: remote.URL + "/v1/",
+		Local: LocalConfig{
+			APIKey: "local-key",
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	mw := NewMiddleware(client)
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mode, ok := ValidateModeFromContext(r.Context())
+		if !ok {
+			t.Fatal("expected validate mode in request context")
+		}
+		if mode != ValidateModeLocal {
+			t.Fatalf("expected local validate mode, got %q", mode)
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	req.Header.Set("CP-X-API-KEY", "local-key")
+	rec := httptest.NewRecorder()
+
+	mw.Handler(next).ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", rec.Code)
 	}

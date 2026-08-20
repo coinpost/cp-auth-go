@@ -8,14 +8,25 @@ type ValidateRequest struct {
 	URLPath    string `json:"url_path,omitempty"`
 }
 
+// ValidateMode records which validation path was used.
+type ValidateMode string
+
+const (
+	// ValidateModeLocal means validation succeeded through Local.APIKey.
+	ValidateModeLocal ValidateMode = "local"
+	// ValidateModeRemote means validation succeeded through the remote auth service.
+	ValidateModeRemote ValidateMode = "remote"
+)
+
 // ValidateResponse is the nested "data" object from the remote service.
 type ValidateResponse struct {
-	Valid         bool     `json:"valid"`
-	ID            string   `json:"id"`
-	Owner         string   `json:"owner"`
-	Scopes        []string `json:"scopes"`
-	RatePerMinute int      `json:"rate_per_minute"`
-	DailyQuota    int      `json:"daily_quota"`
+	Valid         bool         `json:"valid"`
+	ID            string       `json:"id"`
+	Owner         string       `json:"owner"`
+	Scopes        []string     `json:"scopes"`
+	RatePerMinute int          `json:"rate_per_minute"`
+	DailyQuota    int          `json:"daily_quota"`
+	ValidateMode  ValidateMode `json:"-"`
 }
 
 // validateEnvelope matches the full JSON envelope from cp-api-auth.

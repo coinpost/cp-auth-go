@@ -204,6 +204,9 @@ func TestClient_Validate_LocalConfigAPIKeyMatchSkipsRemote(t *testing.T) {
 	if len(resp.Scopes) != 1 || resp.Scopes[0] != "terminal" {
 		t.Fatalf("expected terminal scope, got %#v", resp.Scopes)
 	}
+	if resp.ValidateMode != ValidateModeLocal {
+		t.Fatalf("expected local validate mode, got %q", resp.ValidateMode)
+	}
 }
 
 func TestClient_Validate_LocalConfigAPIKeyMismatchFallsBackRemote(t *testing.T) {
@@ -251,6 +254,9 @@ func TestClient_Validate_LocalConfigAPIKeyMismatchFallsBackRemote(t *testing.T) 
 	}
 	if resp.ID != "remote-id" {
 		t.Fatalf("expected remote response, got id %q", resp.ID)
+	}
+	if resp.ValidateMode != ValidateModeRemote {
+		t.Fatalf("expected remote validate mode, got %q", resp.ValidateMode)
 	}
 }
 

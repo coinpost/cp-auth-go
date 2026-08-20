@@ -140,7 +140,9 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		r = r.WithContext(context.WithValue(r.Context(), validateResponseCtxKey, resp))
+		ctx := context.WithValue(r.Context(), validateResponseCtxKey, resp)
+		ctx = context.WithValue(ctx, validateModeCtxKey, resp.ValidateMode)
+		r = r.WithContext(ctx)
 		if m.successHandler != nil {
 			m.successHandler(w, r, apiKey, resp)
 		}

@@ -284,8 +284,16 @@ func handler(w http.ResponseWriter, r *http.Request) {
         // not set; should not happen if middleware is active
     }
     fmt.Println(resp.Owner, resp.Scopes, resp.RatePerMinute, resp.DailyQuota)
+
+    mode, ok := cpauth.ValidateModeFromContext(r.Context())
+    if ok {
+        fmt.Println(mode) // "local" or "remote"
+    }
 }
 ```
+
+`ValidateResponse.ValidateMode` is also set when using `Validate` or
+`ValidateFromRequest` directly.
 
 ## Response Fields
 
@@ -297,6 +305,7 @@ type ValidateResponse struct {
     Scopes        []string // granted scopes
     RatePerMinute int      // rate limit per minute
     DailyQuota    int      // daily request quota
+    ValidateMode  ValidateMode // "local" or "remote"
 }
 ```
 

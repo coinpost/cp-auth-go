@@ -124,11 +124,18 @@ func MustSetDefault(cfg Config) {
 type contextKey string
 
 const validateResponseCtxKey contextKey = "cpauth.validateResponse"
+const validateModeCtxKey contextKey = "cpauth.validateMode"
 
 // ValidateResponseFromContext retrieves the ValidateResponse stored in the request context by Middleware.
 func ValidateResponseFromContext(ctx context.Context) (ValidateResponse, bool) {
 	resp, ok := ctx.Value(validateResponseCtxKey).(ValidateResponse)
 	return resp, ok
+}
+
+// ValidateModeFromContext retrieves the ValidateMode stored in the request context by Middleware.
+func ValidateModeFromContext(ctx context.Context) (ValidateMode, bool) {
+	mode, ok := ctx.Value(validateModeCtxKey).(ValidateMode)
+	return mode, ok
 }
 
 // loadDefaultClient returns the current default client or nil if not set.
@@ -296,6 +303,7 @@ func (c *Client) validate(ctx context.Context, validateReq ValidateRequest) (Val
 		}
 	}
 
+	envelope.Data.ValidateMode = ValidateModeRemote
 	return envelope.Data, nil
 }
 
@@ -309,9 +317,10 @@ func (c *Client) validateLocal(validateReq ValidateRequest) (ValidateResponse, b
 		owner = "local"
 	}
 	resp := ValidateResponse{
-		Valid: true,
-		ID:    owner,
-		Owner: owner,
+		Valid:        true,
+		ID:           owner,
+		Owner:        owner,
+		ValidateMode: ValidateModeLocal,
 	}
 	if validateReq.Scope != "" {
 		resp.Scopes = []string{validateReq.Scope}
