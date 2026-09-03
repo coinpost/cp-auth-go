@@ -22,11 +22,6 @@ const (
 	headerLegacyFeedstream   = "X-FEEDSTREAM-KEY"
 	headerHTTPMethod         = "http_method"
 	headerURLPath            = "url_path"
-
-	scopeTerminal     = "terminal"
-	scopeSourceFinder = "sourcefinder"
-	scopeOracle       = "oracle"
-	scopeFeedstream   = "feedstream"
 )
 
 // HasAPIKeyHeader reports whether the request contains the standard API key header.
@@ -45,33 +40,13 @@ func extractBearerToken(r *http.Request) string {
 	return fields[1]
 }
 
-// extractAPIKey reads the API key from headers with legacy fallback.
+// extractAPIKey reads the API key from headers with legacy fallback rules.
 // 1. Read CP-X-API-KEY. If present, return it.
-// 2. If scope is "oracle", read Authorization: Bearer <token>.
-// 3. If empty, use scope to determine legacy header:
-//   - "terminal"     -> X-Cp-Terminal-Api-Key
-//   - "sourcefinder" -> X-SOURCEFINDER-KEY
-//   - "feedstream"   -> X-FEEDSTREAM-KEY header, then X-FEEDSTREAM-KEY query parameter
-//
-// 4. Return empty string if nothing found.
+// 2. If empty, use the default ScopeRuleProvider to resolve legacy locations.
+// 3. Return empty string if nothing found.
 func extractAPIKey(r *http.Request, scope string) string {
-	if v := r.Header.Get(headerAPIKey); v != "" {
-		return v
-	}
-	switch strings.ToLower(scope) {
-	case scopeOracle:
-		return extractBearerToken(r)
-	case scopeTerminal:
-		return r.Header.Get(headerLegacyCpTerminal)
-	case scopeSourceFinder:
-		return r.Header.Get(headerLegacySourceFinder)
-	case scopeFeedstream:
-		if v := r.Header.Get(headerLegacyFeedstream); v != "" {
-			return v
-		}
-		return r.URL.Query().Get(headerLegacyFeedstream)
-	}
-	return ""
+	apiKey, _ := extractAPIKeyWithScopeRules(r.Context(), r, scope, DefaultScopeRuleProvider())
+	return apiKey
 }
 
 func extractHTTPMethod(r *http.Request) string {
@@ -349,13 +324,24 @@ func (c *Client) validateRequest(ctx context.Context, apiKey, scope, httpMethod,
 	})
 }
 
+func (c *Client) extractAPIKey(ctx context.Context, r *http.Request, scope string) (string, error) {
+	return extractAPIKeyWithScopeRules(ctx, r, scope, c.config.ScopeRuleProvider)
+}
+
 // ValidateFromRequest extracts the API key from the request header CP-X-API-KEY and validates it.
 func (c *Client) ValidateFromRequest(r *http.Request, scope ...string) (ValidateResponse, error) {
 	if !c.authEnabled() {
 		return c.disabledResponse(), nil
 	}
 	resolvedScope := resolveScope(c.config.Scope, scope...)
-	apiKey := extractAPIKey(r, resolvedScope)
+	apiKey, err := c.extractAPIKey(r.Context(), r, resolvedScope)
+	if err != nil {
+		return ValidateResponse{}, &AuthError{
+			Code:       CodeInternalServerError,
+			Message:    "failed to resolve scope rule: " + err.Error(),
+			HTTPStatus: http.StatusInternalServerError,
+		}
+	}
 	if apiKey == "" {
 		return ValidateResponse{}, &AuthError{
 			Code:       CodeInvalidAPIKey,

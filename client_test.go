@@ -1,7 +1,9 @@
 package cpauth
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -651,6 +653,85 @@ func TestExtractAPIKey_Feedstream(t *testing.T) {
 				t.Fatalf("expected api key %q, got %q", tt.want, got)
 			}
 		})
+	}
+}
+
+func TestClient_ValidateFromRequest_CustomScopeRuleProvider(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req ValidateRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+		if req.APIKey != "db-managed-key" {
+			t.Fatalf("expected api_key 'db-managed-key', got %q", req.APIKey)
+		}
+		if req.Scope != "payments" {
+			t.Fatalf("expected scope 'payments', got %q", req.Scope)
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(validateEnvelope{
+			Code:    0,
+			Message: "ok",
+			Data: ValidateResponse{
+				Valid: true,
+				ID:    "id-payments",
+				Owner: "owner",
+			},
+		})
+	}))
+	defer remote.Close()
+
+	client, err := NewClient(Config{
+		BaseURL:    remote.URL + "/v1/",
+		HTTPClient: http.DefaultClient,
+		ScopeRuleProvider: ScopeRuleProviderFunc(func(ctx context.Context, scope string) (ScopeRule, bool, error) {
+			if scope != "payments" {
+				return ScopeRule{}, false, nil
+			}
+			return ScopeRule{
+				HeaderNames: []string{"X-PAYMENTS-KEY"},
+			}, true, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payments", nil)
+	req.Header.Set("X-PAYMENTS-KEY", "db-managed-key")
+	resp, err := client.ValidateFromRequest(req, "payments")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ID != "id-payments" {
+		t.Fatalf("expected id 'id-payments', got %q", resp.ID)
+	}
+}
+
+func TestClient_ValidateFromRequest_ScopeRuleProviderError(t *testing.T) {
+	client, err := NewClient(Config{
+		BaseURL:    "http://localhost:9999/v1/",
+		HTTPClient: http.DefaultClient,
+		ScopeRuleProvider: ScopeRuleProviderFunc(func(ctx context.Context, scope string) (ScopeRule, bool, error) {
+			return ScopeRule{}, false, errors.New("db unavailable")
+		}),
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payments", nil)
+	_, err = client.ValidateFromRequest(req, "payments")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	authErr, ok := err.(*AuthError)
+	if !ok {
+		t.Fatalf("expected AuthError, got %T", err)
+	}
+	if authErr.HTTPStatus != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", authErr.HTTPStatus)
 	}
 }
 

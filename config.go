@@ -24,6 +24,10 @@ type Config struct {
 	// Local enables local-first validation when Local.APIKey is configured.
 	Local LocalConfig `json:"local,omitempty" yaml:"local,omitempty" mapstructure:"local"`
 
+	// ScopeRuleProvider resolves per-scope API key extraction rules.
+	// Use SQLScopeRuleProvider to load rules from a database.
+	ScopeRuleProvider ScopeRuleProvider `json:"-" yaml:"-" mapstructure:"-"`
+
 	// HTTPClient is the externally injected http.Client.
 	// The caller is responsible for configuring timeouts, retries, transport, etc.
 	HTTPClient *http.Client `json:"-" yaml:"-" mapstructure:"-"`
@@ -58,6 +62,9 @@ func (c *Config) setDefaults() error {
 	}
 	if c.HTTPClient == nil {
 		c.HTTPClient = &http.Client{Timeout: 10 * time.Second}
+	}
+	if c.ScopeRuleProvider == nil {
+		c.ScopeRuleProvider = DefaultScopeRuleProvider()
 	}
 	if !strings.HasSuffix(c.BaseURL, "/") {
 		c.BaseURL += "/"

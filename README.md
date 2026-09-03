@@ -201,6 +201,22 @@ resp, err := cpauth.ValidateFromRequest(r)
 `ValidateFromRequest` also sends `http_method` and `url_path` to cp-api-auth. These values are read from request headers named `http_method` and `url_path`; if those headers are absent, the SDK falls back to the current request method and path-only URL.
 For legacy fallback, pass a scope such as `terminal`, `sourcefinder`, or `feedstream`.
 The `feedstream` scope reads `X-FEEDSTREAM-KEY` from the request header, then from the URL query parameter with the same name.
+To manage scope-specific key locations outside the SDK, inject a `ScopeRuleProvider`.
+`SQLScopeRuleProvider` loads `use_bearer_token`, `header_names`, and `query_param_names` from a database row for the requested scope:
+
+```go
+client, _ := cpauth.NewClient(cpauth.Config{
+    BaseURL: "https://auth.example.com/v1/",
+    ScopeRuleProvider: cpauth.SQLScopeRuleProvider{
+        DB: db,
+        Query: `
+            SELECT use_bearer_token, header_names, query_param_names
+            FROM auth_scope_rules
+            WHERE scope = ?
+        `,
+    },
+})
+```
 
 ## Middleware
 

@@ -108,7 +108,19 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		apiKey := extractAPIKey(r, m.scope)
+		apiKey, err := m.client.extractAPIKey(r.Context(), r, m.scope)
+		if err != nil {
+			if m.ignoreError {
+				next.ServeHTTP(w, r)
+				return
+			}
+			m.errorHandler(w, r, &AuthError{
+				Code:       CodeInternalServerError,
+				Message:    "failed to resolve scope rule: " + err.Error(),
+				HTTPStatus: http.StatusInternalServerError,
+			})
+			return
+		}
 		if apiKey == "" {
 			if m.ignoreError {
 				next.ServeHTTP(w, r)
