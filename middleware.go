@@ -3,6 +3,7 @@ package cpauth
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -196,4 +197,27 @@ func (c *Client) Auth(opts ...MiddlewareOption) func(http.Handler) http.Handler 
 // AuthWithErrHandle is like Auth but allows a custom error handler.
 func (c *Client) AuthWithErrHandle(fn ErrorHandler, opts ...MiddlewareOption) func(http.Handler) http.Handler {
 	return NewMiddleware(c, append(opts, WithErrorHandler(fn))...).Handler
+}
+
+// ScopeRequired returns middleware that requires the authenticated response to include scope.
+func ScopeRequired(scope string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if mode, ok := ValidateModeFromContext(r.Context()); ok && mode == ValidateModeLocal {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			resp, ok := ValidateResponseFromContext(r.Context())
+			if !ok || !slices.Contains(resp.Scopes, scope) {
+				defaultErrorHandler(w, r, &AuthError{
+					Code:       CodeKeyRevokedOrExpired,
+					Message:    "forbidden",
+					HTTPStatus: http.StatusForbidden,
+				})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

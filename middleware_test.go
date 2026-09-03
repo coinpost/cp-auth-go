@@ -1,6 +1,7 @@
 package cpauth
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -205,6 +206,81 @@ func TestMiddleware_LocalValidateModeFromContext(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+}
+
+func TestScopeRequired_AllowsRemoteScope(t *testing.T) {
+	nextCalled := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin", nil)
+	req = req.WithContext(context.WithValue(req.Context(), validateResponseCtxKey, ValidateResponse{
+		Valid:  true,
+		Scopes: []string{"terminal", "admin"},
+	}))
+	rec := httptest.NewRecorder()
+
+	ScopeRequired("admin")(next).ServeHTTP(rec, req)
+
+	if !nextCalled {
+		t.Fatal("expected next handler to be called")
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected status 204, got %d", rec.Code)
+	}
+}
+
+func TestScopeRequired_RejectsMissingRemoteScope(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not be called")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin", nil)
+	req = req.WithContext(context.WithValue(req.Context(), validateResponseCtxKey, ValidateResponse{
+		Valid:  true,
+		Scopes: []string{"terminal"},
+	}))
+	rec := httptest.NewRecorder()
+
+	ScopeRequired("admin")(next).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", rec.Code)
+	}
+}
+
+func TestScopeRequired_AllowsLocalValidateMode(t *testing.T) {
+	client, err := NewClient(Config{
+		BaseURL: "http://auth.local/v1/",
+		Local: LocalConfig{
+			APIKey: "local-key",
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	nextCalled := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handler := NewMiddleware(client).Handler(ScopeRequired("admin")(next))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin", nil)
+	req.Header.Set("CP-X-API-KEY", "local-key")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if !nextCalled {
+		t.Fatal("expected next handler to be called")
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected status 204, got %d", rec.Code)
 	}
 }
 
