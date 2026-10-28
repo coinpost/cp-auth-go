@@ -182,10 +182,10 @@ func (c *Client) Validate(ctx context.Context, apiKey string, scope ...string) (
 	if !c.authEnabled() {
 		return c.disabledResponse(), nil
 	}
-	return c.validate(ctx, ValidateRequest{APIKey: apiKey, Scope: resolveScope(c.config.Scope, scope...)})
+	return c.validate(ctx, ValidateRequest{APIKey: apiKey, Scope: resolveScope(c.config.Scope, scope...)}, nil)
 }
 
-func (c *Client) validate(ctx context.Context, validateReq ValidateRequest) (ValidateResponse, error) {
+func (c *Client) validate(ctx context.Context, validateReq ValidateRequest, headers http.Header) (ValidateResponse, error) {
 	if !c.authEnabled() {
 		return c.disabledResponse(), nil
 	}
@@ -220,6 +220,9 @@ func (c *Client) validate(ctx context.Context, validateReq ValidateRequest) (Val
 			Message:    fmt.Sprintf("failed to build request: %v", err),
 			HTTPStatus: http.StatusInternalServerError,
 		}
+	}
+	if headers != nil {
+		req.Header = headers
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -315,20 +318,20 @@ func (c *Client) disabledResponse() ValidateResponse {
 	}
 }
 
-func (c *Client) validateRequest(ctx context.Context, apiKey, scope, httpMethod, urlPath string) (ValidateResponse, error) {
-	return c.validate(ctx, ValidateRequest{
+func (c *Client) validateRequest(r *http.Request, apiKey, scope string) (ValidateResponse, error) {
+	return c.validate(r.Context(), ValidateRequest{
 		APIKey:     apiKey,
 		Scope:      scope,
-		HTTPMethod: httpMethod,
-		URLPath:    urlPath,
-	})
+		HTTPMethod: extractHTTPMethod(r),
+		URLPath:    extractURLPath(r),
+	}, forwardRequestHeaders(r))
 }
 
 func (c *Client) extractAPIKey(ctx context.Context, r *http.Request, scope string) (string, error) {
 	return extractAPIKeyWithScopeRules(ctx, r, scope, c.config.ScopeRuleProvider)
 }
 
-// ValidateFromRequest extracts the API key from the request header CP-X-API-KEY and validates it.
+// ValidateFromRequest extracts and validates the API key, forwarding request headers to cp-api-auth.
 func (c *Client) ValidateFromRequest(r *http.Request, scope ...string) (ValidateResponse, error) {
 	if !c.authEnabled() {
 		return c.disabledResponse(), nil
@@ -349,7 +352,7 @@ func (c *Client) ValidateFromRequest(r *http.Request, scope ...string) (Validate
 			HTTPStatus: http.StatusUnauthorized,
 		}
 	}
-	return c.validateRequest(r.Context(), apiKey, resolvedScope, extractHTTPMethod(r), extractURLPath(r))
+	return c.validateRequest(r, apiKey, resolvedScope)
 }
 
 func resolveScope(defaultScope string, scope ...string) string {

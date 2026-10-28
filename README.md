@@ -199,6 +199,11 @@ resp, err := cpauth.ValidateFromRequest(r)
 ```
 
 `ValidateFromRequest` also sends `http_method` and `url_path` to cp-api-auth. These values are read from request headers named `http_method` and `url_path`; if those headers are absent, the SDK falls back to the current request method and path-only URL.
+
+`ValidateFromRequest` and authentication middleware forward incoming request headers to cp-api-auth, including `User-Agent`, `X-Forwarded-For`, `X-Real-IP`, `Forwarded`, and custom headers. Multiple values are preserved. When `X-Forwarded-For` is empty, the SDK fills it with the IP from `RemoteAddr`. Behind a proxy, this fallback is the proxy's IP; configure the trusted proxy to set client IP headers. Forwarded IP headers are passed through without checking whether their source is trusted.
+
+Connection-specific headers, headers named by `Connection`, `Host`, original body headers (`Content-Type`, `Content-Length`, `Content-Encoding`), `Expect`, and `Accept-Encoding` are excluded. The auth request uses `Content-Type: application/json` and its own body length. Headers such as `Authorization` and `Cookie` are forwarded as well. Direct `Validate(ctx, apiKey)` calls have no incoming request and do not forward headers; use `ValidateFromRequest(r)` when request headers are needed. Local validation does not send an HTTP request.
+
 For legacy fallback, pass a scope such as `terminal`, `sourcefinder`, or `feedstream`.
 The `feedstream` scope reads `X-FEEDSTREAM-KEY` from the request header, then from the URL query parameter with the same name.
 To manage scope-specific key locations outside the SDK, inject a `ScopeRuleProvider`.
